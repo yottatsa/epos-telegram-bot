@@ -1,0 +1,9 @@
+{
+   "allowed": [],
+   "printer_args" : {
+      "idProduct" : 3605,
+      "idVendor" : 1208
+   },
+   "printer_class" : "Usb",
+   "token" : ""
+}
