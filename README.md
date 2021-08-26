@@ -9,6 +9,5 @@ Prints messages from telegram on EPOS printer.
 ToDo
 ----
 
-* images
 * emoji textifier
 * webpages??
