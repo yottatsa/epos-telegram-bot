@@ -10,4 +10,5 @@ ToDo
 ----
 
 * images
+* emoji textifier
 * webpages??

@@ -1,12 +1,11 @@
 import logging
 import uuid
-from typing import Collection, Set, Dict, Union
+from typing import Callable, Collection, Dict, Set, Union
 
+from escpos.printer import Dummy, Usb
 from telegram import Update
 from telegram.ext import CallbackContext, MessageHandler, Updater
 from telegram.ext.filters import Filters
-
-from escpos.printer import Usb
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -15,13 +14,19 @@ JsonTypes = Union[str, int, bool]
 
 
 class POSBot:
-    classes: Dict[str, type] = {
+    classes: Dict[str, Callable] = {
         "Usb": Usb,
     }
 
-    def __init__(self, token: str, printer_class: str, printer_args: Dict[str, JsonTypes], allowed: Collection[int]) -> None:
+    def __init__(
+        self,
+        token: str = "",
+        printer_class: str = "",
+        printer_args: Dict[str, JsonTypes] = {},
+        allowed: Collection[int] = [],
+    ) -> None:
         self.token = token
-        self.printer = self.classes[printer_class](**printer_args)
+        self.printer = self.classes.get(printer_class, Dummy)(**printer_args)
         self.allowed: Set[int] = set(allowed)
         logger.info("POSBot initialized")
 
