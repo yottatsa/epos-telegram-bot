@@ -1,8 +1,9 @@
 import logging
 import os
 import uuid
+from contextlib import contextmanager
 from tempfile import NamedTemporaryFile
-from typing import Callable, Collection, Dict, Set, Union
+from typing import Callable, Collection, Dict, Generator, Set, Union
 
 from escpos.printer import Dummy, Usb
 from PIL import Image, ImageOps
@@ -14,10 +15,11 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 
 JsonTypes = Union[str, int, bool]
+TPrinter = Union[Usb, Dummy]
 
 
 class POSBot:
-    classes: Dict[str, Callable] = {
+    CLASSES: Dict[str, Callable] = {
         "Usb": Usb,
     }
 
@@ -29,7 +31,8 @@ class POSBot:
         allowed: Collection[int] = [],
     ) -> None:
         self.token = token
-        self.printer = self.classes.get(printer_class, Dummy)(**printer_args)
+        self.printer_class = self.CLASSES.get(printer_class, Dummy)
+        self.printer_args = printer_args
         self.allowed: Set[int] = set(allowed)
         logger.info("POSBot initialized")
 
@@ -43,12 +46,22 @@ class POSBot:
 
         return f
 
+    @contextmanager
+    def printer(self) -> Generator[TPrinter, None, None]:
+        printer: TPrinter = self.printer_class(**self.printer_args)
+        try:
+            yield printer
+        finally:
+            printer.close()
+            del printer
+
     @_acl
     def _text(self, update: Update, context: CallbackContext) -> None:
         message = update.message.text
         logger.info("Received from %d: %s", update.message.chat_id, message)
-        self.printer.textln(message)
-        self.printer.cut()
+        with self.printer() as p:
+            p.textln(message)
+            p.cut()
 
     @_acl
     def _image(self, update: Update, context: CallbackContext) -> None:
@@ -56,14 +69,13 @@ class POSBot:
         t_imagefile = context.bot.getFile(photo.file_id)
         logger.info("Received image from %d: %s", update.message.chat_id, t_imagefile)
         ext = os.path.splitext(t_imagefile["file_path"])[1]
-        with NamedTemporaryFile(suffix=ext) as f:
+        with NamedTemporaryFile(suffix=ext) as f, self.printer() as p:
             imagefile = f.name
             logger.info("Writing to %s", imagefile)
             t_imagefile.download(imagefile)
 
             try:
-                profile = self.printer.profile
-                max_width = int(profile.profile_data["media"]["width"]["pixels"])
+                max_width = int(p.profile.profile_data["media"]["width"]["pixels"])
                 image = Image.open(imagefile)
                 w, h = image.size
                 ar = h / w
@@ -78,20 +90,23 @@ class POSBot:
                 logger.info("Resizing from %s to %s", image.size, size)
                 image.thumbnail(size, Image.ANTIALIAS)
 
-                self.printer.image(image, impl="graphics", center=True)
+                p.image(image, impl="graphics", center=True)
                 del image
 
-                self.printer.cut()
+                p.cut()
                 return
             except KeyError:
                 logger.exception("")
             except ValueError:
                 logger.exception("")
             else:
-                self.printer.image(imagefile)
-                self.printer.cut()
+                p.image(imagefile)
+                p.cut()
 
     def start(self) -> None:
+        with self.printer() as p:
+            logger.info("Printer is %s", p.is_online() and "online" or "offline")
+
         updater = Updater(self.token)
         dispatcher = updater.dispatcher
         dispatcher.add_handler(MessageHandler(Filters.text, self._text))
