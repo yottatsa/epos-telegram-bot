@@ -8,8 +8,8 @@ from typing import Callable, Collection, Dict, Generator, Set, Union
 from escpos.printer import Dummy, Usb
 from PIL import Image, ImageOps
 from telegram import Update
-from telegram.ext import CallbackContext, MessageHandler, Updater
-from telegram.ext.filters import Filters
+from telegram.ext import Application, CallbackContext, MessageHandler
+import telegram.ext.filters as filters
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ class POSBot:
             del printer
 
     @_acl
-    def _text(self, update: Update, context: CallbackContext) -> None:
+    async def _text(self, update: Update, context: CallbackContext) -> None:
         message = update.message.text
         logger.info("Received from %d: %s", update.message.chat_id, message)
         with self.printer() as p:
@@ -64,15 +64,15 @@ class POSBot:
             p.cut()
 
     @_acl
-    def _image(self, update: Update, context: CallbackContext) -> None:
+    async def _image(self, update: Update, context: CallbackContext) -> None:
         photo = update.message.photo[-1]
-        t_imagefile = context.bot.getFile(photo.file_id)
+        t_imagefile = await context.bot.getFile(photo.file_id)
         logger.info("Received image from %d: %s", update.message.chat_id, t_imagefile)
         ext = os.path.splitext(t_imagefile["file_path"])[1]
         with NamedTemporaryFile(suffix=ext) as f, self.printer() as p:
             imagefile = f.name
             logger.info("Writing to %s", imagefile)
-            t_imagefile.download(imagefile)
+            await t_imagefile.download_to_drive(imagefile)
 
             try:
                 max_width = int(p.profile.profile_data["media"]["width"]["pixels"])
@@ -88,7 +88,7 @@ class POSBot:
 
                 size = (max_width, int(max_width * ar))
                 logger.info("Resizing from %s to %s", image.size, size)
-                image.thumbnail(size, Image.ANTIALIAS)
+                image.thumbnail(size, Image.Resampling.LANCZOS)
 
                 p.image(image, impl="graphics", center=True)
                 del image
@@ -107,9 +107,7 @@ class POSBot:
         with self.printer() as p:
             logger.info("Printer is %s", p.is_online() and "online" or "offline")
 
-        updater = Updater(self.token)
-        dispatcher = updater.dispatcher
-        dispatcher.add_handler(MessageHandler(Filters.text, self._text))
-        dispatcher.add_handler(MessageHandler(Filters.photo, self._image))
-        updater.start_polling()
-        updater.idle()
+        application = Application.builder().token(self.token).build()
+        application.add_handler(MessageHandler(filters.TEXT, self._text))
+        application.add_handler(MessageHandler(filters.PHOTO, self._image))
+        application.run_polling()
